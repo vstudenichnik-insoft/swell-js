@@ -10,6 +10,8 @@ import isEqual from 'lodash-es/isEqual';
 import deepmerge from 'deepmerge';
 import { camelize, decamelize, camelizeKeys, decamelizeKeys } from 'fast-case';
 
+const LOADING_SCRIPTS = {};
+
 let options = {};
 
 function merge(x, y, opt = {}) {
@@ -173,7 +175,7 @@ async function vaultRequest(method, url, data, opt = undefined) {
         err.status = result.$status;
         reject(err);
       } else {
-        resolve(options.useCamelCase ? toCamel(result.$data) : result.$data);
+        resolve(result.$data);
       }
       delete window[callback];
       script.parentNode.removeChild(script);
@@ -257,6 +259,37 @@ function removeUrlParams() {
   window.history.pushState({ path: url }, '', url);
 }
 
+async function loadScript(id, src, attributes = {}) {
+  LOADING_SCRIPTS[id] =
+    LOADING_SCRIPTS[id] ||
+    new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.id = id;
+      script.src = src;
+      script.async = true;
+      script.type = 'text/javascript';
+      for (const [key, value] of Object.entries(attributes)) {
+        script.setAttribute(key, value);
+      }
+      script.addEventListener(
+        'load',
+        () => {
+          resolve();
+          LOADING_SCRIPTS[id] = null;
+        },
+        {
+          once: true,
+        },
+      );
+      document.head.appendChild(script);
+    });
+  return LOADING_SCRIPTS[id];
+}
+
+function isLiveMode(mode) {
+  return mode !== 'test';
+}
+
 export {
   defaultMethods,
   set,
@@ -288,4 +321,6 @@ export {
   vaultRequest,
   getLocationParams,
   removeUrlParams,
+  loadScript,
+  isLiveMode,
 };
