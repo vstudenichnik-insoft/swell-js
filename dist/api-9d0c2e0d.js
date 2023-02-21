@@ -1,18 +1,18 @@
-import { c as cardApi } from './card-31d20d88.js';
-import { g as getCookie, s as setCookie } from './cookie-dff5d694.js';
-import { c as cacheApi } from './cache-70cd9241.js';
-import { m as methods$1 } from './cart-fe0aca95.js';
+import { c as cardApi } from './card-4b026daa.js';
+import { g as getCookie, s as setCookie } from './cookie-908ee810.js';
+import { c as cacheApi } from './cache-54a2837a.js';
+import { m as methods$1 } from './cart-f9e9c8f9.js';
 import { m as methods$2 } from './account-328cc590.js';
-import { m as methods$3 } from './products-9a198f48.js';
-import { m as methods$4 } from './categories-bb6f6179.js';
-import { m as methods$5 } from './attributes-a5d59cae.js';
-import { m as methods$6 } from './subscriptions-5d5db711.js';
-import { d as defaultMethods, n as trimEnd, E as utils, l as trimStart, k as trimBoth, j as toSnake, o as stringifyQuery, A as base64Encode, t as toCamel, e as setOptions } from './index-bee7164f.js';
-import { m as methods$7 } from './content-8feae575.js';
-import { m as methods$8 } from './settings-3cf85d69.js';
-import { m as methods$9 } from './payment-491338ef.js';
-import { m as methods$a } from './locale-abdc14e0.js';
-import { m as methods$b } from './currency-85151e0d.js';
+import { m as methods$3 } from './products-62b5f349.js';
+import { m as methods$4 } from './categories-7ac17392.js';
+import { m as methods$5 } from './attributes-2b4a35df.js';
+import { m as methods$6 } from './subscriptions-6ca7c1bd.js';
+import { d as defaultMethods, n as trimEnd, G as utils, l as trimStart, k as trimBoth, j as toSnake, o as stringifyQuery, A as base64Encode, t as toCamel, e as setOptions } from './index-20375c1d.js';
+import { m as methods$7 } from './content-9fc0aaf8.js';
+import { m as methods$8 } from './settings-74960ec1.js';
+import { P as PaymentController } from './index-9774a003.js';
+import { m as methods$9 } from './locale-3f8d8aa8.js';
+import { m as methods$a } from './currency-f3927f9f.js';
 
 function methods(request) {
   const { get, list } = defaultMethods(request, '/invoices', ['list', 'get']);
@@ -54,6 +54,8 @@ const api = {
     options.locale = opt.locale;
     options.currency = opt.currency;
     options.api = api;
+    options.getCart = opt.getCart;
+    options.updateCart = opt.updateCart;
     setOptions(options);
   },
 
@@ -100,11 +102,11 @@ const api = {
 
   settings: methods$8(request, options),
 
-  payment: methods$9(request, options),
+  payment: new PaymentController(request, options),
 
-  locale: methods$a(request, options),
+  locale: methods$9(request, options),
 
-  currency: methods$b(request, options),
+  currency: methods$a(request, options),
 
   utils,
 };

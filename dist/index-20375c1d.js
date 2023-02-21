@@ -4056,6 +4056,8 @@ function isEqual(value, other) {
   return baseIsEqual(value, other);
 }
 
+const LOADING_SCRIPTS = {};
+
 let options = {};
 
 function merge(x, y, opt = {}) {
@@ -4219,7 +4221,7 @@ async function vaultRequest(method, url, data, opt = undefined) {
         err.status = result.$status;
         reject(err);
       } else {
-        resolve(options.useCamelCase ? toCamel(result.$data) : result.$data);
+        resolve(result.$data);
       }
       delete window[callback];
       script.parentNode.removeChild(script);
@@ -4302,6 +4304,37 @@ function removeUrlParams() {
   window.history.pushState({ path: url }, '', url);
 }
 
+async function loadScript(id, src, attributes = {}) {
+  LOADING_SCRIPTS[id] =
+    LOADING_SCRIPTS[id] ||
+    new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.id = id;
+      script.src = src;
+      script.async = true;
+      script.type = 'text/javascript';
+      for (const [key, value] of Object.entries(attributes)) {
+        script.setAttribute(key, value);
+      }
+      script.addEventListener(
+        'load',
+        () => {
+          resolve();
+          LOADING_SCRIPTS[id] = null;
+        },
+        {
+          once: true,
+        },
+      );
+      document.head.appendChild(script);
+    });
+  return LOADING_SCRIPTS[id];
+}
+
+function isLiveMode(mode) {
+  return mode !== 'test';
+}
+
 var utils = /*#__PURE__*/Object.freeze({
   __proto__: null,
   defaultMethods: defaultMethods,
@@ -4333,7 +4366,9 @@ var utils = /*#__PURE__*/Object.freeze({
   base64Encode: base64Encode,
   vaultRequest: vaultRequest,
   getLocationParams: getLocationParams,
-  removeUrlParams: removeUrlParams
+  removeUrlParams: removeUrlParams,
+  loadScript: loadScript,
+  isLiveMode: isLiveMode
 });
 
-export { base64Encode as A, vaultRequest as B, getLocationParams as C, removeUrlParams as D, utils as E, toString as F, keys as G, isArrayLike as H, baseIteratee as I, isArray as J, isBuffer as K, isTypedArray as L, isArguments as M, getTag$1 as N, isPrototype as O, baseKeys as P, arrayMap as Q, toNumber as R, findIndex as a, cloneDeep as b, camelCase as c, defaultMethods as d, setOptions as e, find as f, get as g, getOptions as h, toCamelPath as i, toSnake as j, trimBoth as k, trimStart as l, merge as m, trimEnd as n, stringifyQuery as o, isServer as p, isFunction as q, round as r, set as s, toCamel as t, uniq as u, isObject as v, isEqual as w, snakeCase as x, map as y, reduce as z };
+export { base64Encode as A, vaultRequest as B, getLocationParams as C, removeUrlParams as D, loadScript as E, isLiveMode as F, utils as G, keys as H, isArrayLike as I, baseIteratee as J, isArray as K, isBuffer as L, isTypedArray as M, isArguments as N, getTag$1 as O, isPrototype as P, baseKeys as Q, toString as R, arrayMap as S, toNumber as T, findIndex as a, cloneDeep as b, camelCase as c, defaultMethods as d, setOptions as e, find as f, get as g, getOptions as h, toCamelPath as i, toSnake as j, trimBoth as k, trimStart as l, merge as m, trimEnd as n, stringifyQuery as o, isServer as p, isFunction as q, round as r, set as s, toCamel as t, uniq as u, isObject as v, isEqual as w, snakeCase as x, map as y, reduce as z };
