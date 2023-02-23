@@ -1422,52 +1422,10 @@ class StripeGooglePayment extends Payment {
       );
     }
 
-    this._renderButton();
-  }
+    const cart = await this.getCart();
+    const paymentRequestData = this._createPaymentRequestData(cart);
 
-  _renderButton() {
-    const {
-      elementId = 'googlepay-button',
-      locale = 'en',
-      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
-      classes = {},
-    } = this.params;
-
-    const container = document.getElementById(elementId);
-
-    if (!container) {
-      throw new Error(`DOM element with '${elementId}' ID not found`);
-    }
-
-    if (classes.base) {
-      container.classList.add(classes.base);
-    }
-
-    const button = this.googleClient.createButton({
-      buttonColor: color,
-      buttonType: type,
-      buttonSizeMode: sizeMode,
-      buttonLocale: locale,
-      onClick: this._onClick.bind(this),
-    });
-
-    container.appendChild(button);
-  }
-
-  async _onClick() {
-    try {
-      const cart = await this.getCart();
-      const paymentRequestData = this._createPaymentRequestData(cart);
-      const paymentData = await this.googleClient.loadPaymentData(
-        paymentRequestData,
-      );
-
-      if (paymentData) {
-        await this._submitPayment(cart, paymentData);
-      }
-    } catch (error) {
-      this.onError(error);
-    }
+    this._renderButton(paymentRequestData);
   }
 
   _createPaymentRequestData(cart) {
@@ -1499,7 +1457,50 @@ class StripeGooglePayment extends Payment {
     };
   }
 
-  async _submitPayment(cart, paymentData) {
+  _renderButton(paymentRequestData) {
+    const {
+      elementId = 'googlepay-button',
+      locale = 'en',
+      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
+      classes = {},
+    } = this.params;
+
+    const container = document.getElementById(elementId);
+
+    if (!container) {
+      throw new Error(`DOM element with '${elementId}' ID not found`);
+    }
+
+    if (classes.base) {
+      container.classList.add(classes.base);
+    }
+
+    const button = this.googleClient.createButton({
+      buttonColor: color,
+      buttonType: type,
+      buttonSizeMode: sizeMode,
+      buttonLocale: locale,
+      onClick: this._onClick.bind(this, paymentRequestData),
+    });
+
+    container.appendChild(button);
+  }
+
+  async _onClick(paymentRequestData) {
+    try {
+      const paymentData = await this.googleClient.loadPaymentData(
+        paymentRequestData,
+      );
+
+      if (paymentData) {
+        await this._submitPayment(paymentData);
+      }
+    } catch (error) {
+      this.onError(error);
+    }
+  }
+
+  async _submitPayment(paymentData) {
     const { require: { shipping: requireShipping } = {} } = this.params;
     const { email, shippingAddress, paymentMethodData } = paymentData;
     const {
@@ -1508,15 +1509,12 @@ class StripeGooglePayment extends Payment {
     } = paymentMethodData;
     const token = JSON.parse(tokenizationData.token);
     const { card } = token;
-    const shouldUpdateAccount = !Boolean(cart.account && cart.account.email);
 
-    await this.updateCart({
-      ...(shouldUpdateAccount && {
-        account: {
-          email,
-          name: shippingAddress ? shippingAddress.name : billingAddress.name,
-        },
-      }),
+    this.onSuccess({
+      account: {
+        email,
+        name: shippingAddress ? shippingAddress.name : billingAddress.name,
+      },
       billing: {
         method: 'card',
         card: {
@@ -1533,8 +1531,6 @@ class StripeGooglePayment extends Payment {
         shipping: this._mapAddress(shippingAddress),
       }),
     });
-
-    this.onSuccess();
   }
 
   _mapAddress(address) {
@@ -1623,8 +1619,8 @@ class StripeApplePayment extends Payment {
     const paymentRequest = this.stripe.paymentRequest({
       requestPayerName: Boolean(name),
       requestPayerEmail: Boolean(email),
-      requestPayerPhone: Boolean(shipping),
-      requestShipping: Boolean(phone),
+      requestPayerPhone: Boolean(phone),
+      requestShipping: Boolean(shipping),
       disableWallets: ['googlePay', 'browserCard', 'link'],
       ...this._getPaymentRequestData(cart),
     });
@@ -1637,7 +1633,7 @@ class StripeApplePayment extends Payment {
       'shippingoptionchange',
       this._onShippingOptionChange.bind(this),
     );
-    paymentRequest.on('paymentmethod', this._onPaymentMethod.bind(this, cart));
+    paymentRequest.on('paymentmethod', this._onPaymentMethod.bind(this));
 
     return paymentRequest;
   }
@@ -1757,7 +1753,7 @@ class StripeApplePayment extends Payment {
     }
   }
 
-  async _onPaymentMethod(cart, event) {
+  async _onPaymentMethod(event) {
     const {
       payerEmail,
       payerName,
@@ -1767,15 +1763,12 @@ class StripeApplePayment extends Payment {
       complete,
     } = event;
     const { require: { shipping: requireShipping } = {} } = this.params;
-    const shouldUpdateAccount = !Boolean(cart.account && cart.account.email);
 
-    await this.updateCart({
-      ...(shouldUpdateAccount && {
-        account: {
-          name: payerName,
-          email: payerEmail,
-        },
-      }),
+    this.onSuccess({
+      account: {
+        name: payerName,
+        email: payerEmail,
+      },
       ...(requireShipping && {
         shipping: {
           ...this._mapShippingAddress(shippingAddress),
@@ -1800,8 +1793,6 @@ class StripeApplePayment extends Payment {
     });
 
     complete('success');
-
-    this.onSuccess();
   }
 
   _mapShippingAddress(address = {}) {
@@ -2023,60 +2014,18 @@ class BraintreeGooglePayment extends Payment {
       );
     }
 
-    this._renderButton();
-  }
-
-  _renderButton() {
-    const {
-      elementId = 'googlepay-button',
-      locale = 'en',
-      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
-      classes = {},
-    } = this.params;
-
-    const container = document.getElementById(elementId);
-
-    if (!container) {
-      throw new Error(`DOM element with '${elementId}' ID not found`);
-    }
-
-    if (classes.base) {
-      container.classList.add(classes.base);
-    }
-
-    const button = this.googleClient.createButton({
-      buttonColor: color,
-      buttonType: type,
-      buttonSizeMode: sizeMode,
-      buttonLocale: locale,
-      onClick: this._onClick.bind(this),
+    const braintreeClient = await this._createBraintreeClient();
+    const googlePayment = await this.braintree.googlePayment.create({
+      client: braintreeClient,
+      googleMerchantId: this.method.merchant_id,
+      googlePayVersion: API_VERSION,
     });
+    const cart = await this.getCart();
+    const paymentRequestData = this._createPaymentRequestData(cart);
+    const paymentDataRequest =
+      googlePayment.createPaymentDataRequest(paymentRequestData);
 
-    container.appendChild(button);
-  }
-
-  async _onClick() {
-    try {
-      const cart = await this.getCart();
-      const paymentRequestData = this._createPaymentRequestData(cart);
-      const braintreeClient = await this._createBraintreeClient();
-      const googlePayment = await this.braintree.googlePayment.create({
-        client: braintreeClient,
-        googleMerchantId: this.method.merchant_id,
-        googlePayVersion: API_VERSION,
-      });
-      const paymentDataRequest =
-        googlePayment.createPaymentDataRequest(paymentRequestData);
-      const paymentData = await this.googleClient.loadPaymentData(
-        paymentDataRequest,
-      );
-
-      if (paymentData) {
-        await this._submitPayment(cart, googlePayment, paymentData);
-      }
-    } catch (error) {
-      this.onError(error);
-    }
+    this._renderButton(googlePayment, paymentDataRequest);
   }
 
   async _createBraintreeClient() {
@@ -2122,8 +2071,50 @@ class BraintreeGooglePayment extends Payment {
     };
   }
 
-  async _submitPayment(cart, googlePayment, paymentData) {
-    const shouldUpdateAccount = !Boolean(cart.account && cart.account.email);
+  _renderButton(googlePayment, paymentDataRequest) {
+    const {
+      elementId = 'googlepay-button',
+      locale = 'en',
+      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
+      classes = {},
+    } = this.params;
+
+    const container = document.getElementById(elementId);
+
+    if (!container) {
+      throw new Error(`DOM element with '${elementId}' ID not found`);
+    }
+
+    if (classes.base) {
+      container.classList.add(classes.base);
+    }
+
+    const button = this.googleClient.createButton({
+      buttonColor: color,
+      buttonType: type,
+      buttonSizeMode: sizeMode,
+      buttonLocale: locale,
+      onClick: this._onClick.bind(this, googlePayment, paymentDataRequest),
+    });
+
+    container.appendChild(button);
+  }
+
+  async _onClick(googlePayment, paymentDataRequest) {
+    try {
+      const paymentData = await this.googleClient.loadPaymentData(
+        paymentDataRequest,
+      );
+
+      if (paymentData) {
+        await this._submitPayment(googlePayment, paymentData);
+      }
+    } catch (error) {
+      this.onError(error);
+    }
+  }
+
+  async _submitPayment(googlePayment, paymentData) {
     const { require: { shipping: requireShipping } = {} } = this.params;
     const { nonce } = await googlePayment.parseResponse(paymentData);
     const { email, shippingAddress, paymentMethodData } = paymentData;
@@ -2131,13 +2122,11 @@ class BraintreeGooglePayment extends Payment {
       info: { billingAddress },
     } = paymentMethodData;
 
-    await this.updateCart({
-      ...(shouldUpdateAccount && {
-        account: {
-          email,
-          name: shippingAddress ? shippingAddress.name : billingAddress.name,
-        },
-      }),
+    this.onSuccess({
+      account: {
+        email,
+        name: shippingAddress ? shippingAddress.name : billingAddress.name,
+      },
       billing: {
         method: 'google',
         google: {
@@ -2150,8 +2139,6 @@ class BraintreeGooglePayment extends Payment {
         shipping: this._mapAddress(shippingAddress),
       }),
     });
-
-    this.onSuccess();
   }
 
   _mapAddress(address) {
@@ -2218,10 +2205,10 @@ class BraintreeApplePayment extends Payment {
     });
     const paymentRequest = await this._createPaymentRequest(cart, applePayment);
 
-    this._renderButton(cart, applePayment, paymentRequest);
+    this._renderButton(applePayment, paymentRequest);
   }
 
-  _renderButton(cart, applePayment, paymentRequest) {
+  _renderButton(applePayment, paymentRequest) {
     const {
       elementId = 'applepay-button',
       style: { type = 'plain', theme = 'black', height = '40px' } = {},
@@ -2246,7 +2233,7 @@ class BraintreeApplePayment extends Payment {
 
     button.addEventListener(
       'click',
-      this._createPaymentSession.bind(this, cart, applePayment, paymentRequest),
+      this._createPaymentSession.bind(this, applePayment, paymentRequest),
     );
 
     container.appendChild(button);
@@ -2303,7 +2290,7 @@ class BraintreeApplePayment extends Payment {
     });
   }
 
-  _createPaymentSession(cart, applePayment, paymentRequest) {
+  _createPaymentSession(applePayment, paymentRequest) {
     const session = new this.ApplePaySession(VERSION, paymentRequest);
 
     session.onvalidatemerchant = async (event) => {
@@ -2325,7 +2312,6 @@ class BraintreeApplePayment extends Payment {
       const {
         payment: { token, shippingContact, billingContact },
       } = event;
-      const shouldUpdateAccount = !Boolean(cart.account && cart.account.email);
       const { require: { shipping: requireShipping } = {} } = this.params;
       const payload = await applePayment
         .tokenize({ token })
@@ -2335,14 +2321,12 @@ class BraintreeApplePayment extends Payment {
         return session.completePayment(this.ApplePaySession.STATUS_FAILURE);
       }
 
-      await this.updateCart({
-        ...(shouldUpdateAccount && {
-          account: {
-            email: shippingContact.emailAddress,
-            first_name: shippingContact.givenName,
-            last_name: shippingContact.familyName,
-          },
-        }),
+      this.onSuccess({
+        account: {
+          email: shippingContact.emailAddress,
+          first_name: shippingContact.givenName,
+          last_name: shippingContact.familyName,
+        },
         billing: {
           method: 'apple',
           apple: {
@@ -2355,8 +2339,6 @@ class BraintreeApplePayment extends Payment {
           shipping: this._mapAddress(shippingContact),
         }),
       });
-
-      this.onSuccess();
 
       return session.completePayment(this.ApplePaySession.STATUS_SUCCESS);
     };

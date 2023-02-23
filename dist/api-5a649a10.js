@@ -10,7 +10,7 @@ import { m as methods$6 } from './subscriptions-6ca7c1bd.js';
 import { d as defaultMethods, n as trimEnd, G as utils, l as trimStart, k as trimBoth, j as toSnake, o as stringifyQuery, A as base64Encode, t as toCamel, e as setOptions } from './index-20375c1d.js';
 import { m as methods$7 } from './content-9fc0aaf8.js';
 import { m as methods$8 } from './settings-74960ec1.js';
-import { P as PaymentController } from './index-9774a003.js';
+import { P as PaymentController } from './index-39e247cd.js';
 import { m as methods$9 } from './locale-3f8d8aa8.js';
 import { m as methods$a } from './currency-f3927f9f.js';
 
