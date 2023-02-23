@@ -54,10 +54,10 @@ export default class BraintreeApplePayment extends Payment {
     });
     const paymentRequest = await this._createPaymentRequest(cart, applePayment);
 
-    this._renderButton(cart, applePayment, paymentRequest);
+    this._renderButton(applePayment, paymentRequest);
   }
 
-  _renderButton(cart, applePayment, paymentRequest) {
+  _renderButton(applePayment, paymentRequest) {
     const {
       elementId = 'applepay-button',
       style: { type = 'plain', theme = 'black', height = '40px' } = {},
@@ -82,7 +82,7 @@ export default class BraintreeApplePayment extends Payment {
 
     button.addEventListener(
       'click',
-      this._createPaymentSession.bind(this, cart, applePayment, paymentRequest),
+      this._createPaymentSession.bind(this, applePayment, paymentRequest),
     );
 
     container.appendChild(button);
@@ -139,7 +139,7 @@ export default class BraintreeApplePayment extends Payment {
     });
   }
 
-  _createPaymentSession(cart, applePayment, paymentRequest) {
+  _createPaymentSession(applePayment, paymentRequest) {
     const session = new this.ApplePaySession(VERSION, paymentRequest);
 
     session.onvalidatemerchant = async (event) => {
@@ -161,7 +161,6 @@ export default class BraintreeApplePayment extends Payment {
       const {
         payment: { token, shippingContact, billingContact },
       } = event;
-      const shouldUpdateAccount = !Boolean(cart.account && cart.account.email);
       const { require: { shipping: requireShipping } = {} } = this.params;
       const payload = await applePayment
         .tokenize({ token })
@@ -171,14 +170,12 @@ export default class BraintreeApplePayment extends Payment {
         return session.completePayment(this.ApplePaySession.STATUS_FAILURE);
       }
 
-      await this.updateCart({
-        ...(shouldUpdateAccount && {
-          account: {
-            email: shippingContact.emailAddress,
-            first_name: shippingContact.givenName,
-            last_name: shippingContact.familyName,
-          },
-        }),
+      this.onSuccess({
+        account: {
+          email: shippingContact.emailAddress,
+          first_name: shippingContact.givenName,
+          last_name: shippingContact.familyName,
+        },
         billing: {
           method: 'apple',
           apple: {
@@ -191,8 +188,6 @@ export default class BraintreeApplePayment extends Payment {
           shipping: this._mapAddress(shippingContact),
         }),
       });
-
-      this.onSuccess();
 
       return session.completePayment(this.ApplePaySession.STATUS_SUCCESS);
     };

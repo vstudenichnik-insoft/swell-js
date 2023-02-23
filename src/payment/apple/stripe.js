@@ -77,8 +77,8 @@ export default class StripeApplePayment extends Payment {
     const paymentRequest = this.stripe.paymentRequest({
       requestPayerName: Boolean(name),
       requestPayerEmail: Boolean(email),
-      requestPayerPhone: Boolean(shipping),
-      requestShipping: Boolean(phone),
+      requestPayerPhone: Boolean(phone),
+      requestShipping: Boolean(shipping),
       disableWallets: ['googlePay', 'browserCard', 'link'],
       ...this._getPaymentRequestData(cart),
     });
@@ -91,7 +91,7 @@ export default class StripeApplePayment extends Payment {
       'shippingoptionchange',
       this._onShippingOptionChange.bind(this),
     );
-    paymentRequest.on('paymentmethod', this._onPaymentMethod.bind(this, cart));
+    paymentRequest.on('paymentmethod', this._onPaymentMethod.bind(this));
 
     return paymentRequest;
   }
@@ -211,7 +211,7 @@ export default class StripeApplePayment extends Payment {
     }
   }
 
-  async _onPaymentMethod(cart, event) {
+  async _onPaymentMethod(event) {
     const {
       payerEmail,
       payerName,
@@ -221,15 +221,12 @@ export default class StripeApplePayment extends Payment {
       complete,
     } = event;
     const { require: { shipping: requireShipping } = {} } = this.params;
-    const shouldUpdateAccount = !Boolean(cart.account && cart.account.email);
 
-    await this.updateCart({
-      ...(shouldUpdateAccount && {
-        account: {
-          name: payerName,
-          email: payerEmail,
-        },
-      }),
+    this.onSuccess({
+      account: {
+        name: payerName,
+        email: payerEmail,
+      },
       ...(requireShipping && {
         shipping: {
           ...this._mapShippingAddress(shippingAddress),
@@ -254,8 +251,6 @@ export default class StripeApplePayment extends Payment {
     });
 
     complete('success');
-
-    this.onSuccess();
   }
 
   _mapShippingAddress(address = {}) {

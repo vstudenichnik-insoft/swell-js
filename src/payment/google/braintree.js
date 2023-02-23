@@ -103,60 +103,18 @@ export default class BraintreeGooglePayment extends Payment {
       );
     }
 
-    this._renderButton();
-  }
-
-  _renderButton() {
-    const {
-      elementId = 'googlepay-button',
-      locale = 'en',
-      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
-      classes = {},
-    } = this.params;
-
-    const container = document.getElementById(elementId);
-
-    if (!container) {
-      throw new Error(`DOM element with '${elementId}' ID not found`);
-    }
-
-    if (classes.base) {
-      container.classList.add(classes.base);
-    }
-
-    const button = this.googleClient.createButton({
-      buttonColor: color,
-      buttonType: type,
-      buttonSizeMode: sizeMode,
-      buttonLocale: locale,
-      onClick: this._onClick.bind(this),
+    const braintreeClient = await this._createBraintreeClient();
+    const googlePayment = await this.braintree.googlePayment.create({
+      client: braintreeClient,
+      googleMerchantId: this.method.merchant_id,
+      googlePayVersion: API_VERSION,
     });
+    const cart = await this.getCart();
+    const paymentRequestData = this._createPaymentRequestData(cart);
+    const paymentDataRequest =
+      googlePayment.createPaymentDataRequest(paymentRequestData);
 
-    container.appendChild(button);
-  }
-
-  async _onClick() {
-    try {
-      const cart = await this.getCart();
-      const paymentRequestData = this._createPaymentRequestData(cart);
-      const braintreeClient = await this._createBraintreeClient();
-      const googlePayment = await this.braintree.googlePayment.create({
-        client: braintreeClient,
-        googleMerchantId: this.method.merchant_id,
-        googlePayVersion: API_VERSION,
-      });
-      const paymentDataRequest =
-        googlePayment.createPaymentDataRequest(paymentRequestData);
-      const paymentData = await this.googleClient.loadPaymentData(
-        paymentDataRequest,
-      );
-
-      if (paymentData) {
-        await this._submitPayment(cart, googlePayment, paymentData);
-      }
-    } catch (error) {
-      this.onError(error);
-    }
+    this._renderButton(googlePayment, paymentDataRequest);
   }
 
   async _createBraintreeClient() {
@@ -202,8 +160,50 @@ export default class BraintreeGooglePayment extends Payment {
     };
   }
 
-  async _submitPayment(cart, googlePayment, paymentData) {
-    const shouldUpdateAccount = !Boolean(cart.account && cart.account.email);
+  _renderButton(googlePayment, paymentDataRequest) {
+    const {
+      elementId = 'googlepay-button',
+      locale = 'en',
+      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
+      classes = {},
+    } = this.params;
+
+    const container = document.getElementById(elementId);
+
+    if (!container) {
+      throw new Error(`DOM element with '${elementId}' ID not found`);
+    }
+
+    if (classes.base) {
+      container.classList.add(classes.base);
+    }
+
+    const button = this.googleClient.createButton({
+      buttonColor: color,
+      buttonType: type,
+      buttonSizeMode: sizeMode,
+      buttonLocale: locale,
+      onClick: this._onClick.bind(this, googlePayment, paymentDataRequest),
+    });
+
+    container.appendChild(button);
+  }
+
+  async _onClick(googlePayment, paymentDataRequest) {
+    try {
+      const paymentData = await this.googleClient.loadPaymentData(
+        paymentDataRequest,
+      );
+
+      if (paymentData) {
+        await this._submitPayment(googlePayment, paymentData);
+      }
+    } catch (error) {
+      this.onError(error);
+    }
+  }
+
+  async _submitPayment(googlePayment, paymentData) {
     const { require: { shipping: requireShipping } = {} } = this.params;
     const { nonce } = await googlePayment.parseResponse(paymentData);
     const { email, shippingAddress, paymentMethodData } = paymentData;
@@ -211,13 +211,11 @@ export default class BraintreeGooglePayment extends Payment {
       info: { billingAddress },
     } = paymentMethodData;
 
-    await this.updateCart({
-      ...(shouldUpdateAccount && {
-        account: {
-          email,
-          name: shippingAddress ? shippingAddress.name : billingAddress.name,
-        },
-      }),
+    this.onSuccess({
+      account: {
+        email,
+        name: shippingAddress ? shippingAddress.name : billingAddress.name,
+      },
       billing: {
         method: 'google',
         google: {
@@ -230,8 +228,6 @@ export default class BraintreeGooglePayment extends Payment {
         shipping: this._mapAddress(shippingAddress),
       }),
     });
-
-    this.onSuccess();
   }
 
   _mapAddress(address) {

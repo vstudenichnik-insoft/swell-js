@@ -119,52 +119,10 @@ export default class StripeGooglePayment extends Payment {
       );
     }
 
-    this._renderButton();
-  }
+    const cart = await this.getCart();
+    const paymentRequestData = this._createPaymentRequestData(cart);
 
-  _renderButton() {
-    const {
-      elementId = 'googlepay-button',
-      locale = 'en',
-      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
-      classes = {},
-    } = this.params;
-
-    const container = document.getElementById(elementId);
-
-    if (!container) {
-      throw new Error(`DOM element with '${elementId}' ID not found`);
-    }
-
-    if (classes.base) {
-      container.classList.add(classes.base);
-    }
-
-    const button = this.googleClient.createButton({
-      buttonColor: color,
-      buttonType: type,
-      buttonSizeMode: sizeMode,
-      buttonLocale: locale,
-      onClick: this._onClick.bind(this),
-    });
-
-    container.appendChild(button);
-  }
-
-  async _onClick() {
-    try {
-      const cart = await this.getCart();
-      const paymentRequestData = this._createPaymentRequestData(cart);
-      const paymentData = await this.googleClient.loadPaymentData(
-        paymentRequestData,
-      );
-
-      if (paymentData) {
-        await this._submitPayment(cart, paymentData);
-      }
-    } catch (error) {
-      this.onError(error);
-    }
+    this._renderButton(paymentRequestData);
   }
 
   _createPaymentRequestData(cart) {
@@ -196,7 +154,50 @@ export default class StripeGooglePayment extends Payment {
     };
   }
 
-  async _submitPayment(cart, paymentData) {
+  _renderButton(paymentRequestData) {
+    const {
+      elementId = 'googlepay-button',
+      locale = 'en',
+      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
+      classes = {},
+    } = this.params;
+
+    const container = document.getElementById(elementId);
+
+    if (!container) {
+      throw new Error(`DOM element with '${elementId}' ID not found`);
+    }
+
+    if (classes.base) {
+      container.classList.add(classes.base);
+    }
+
+    const button = this.googleClient.createButton({
+      buttonColor: color,
+      buttonType: type,
+      buttonSizeMode: sizeMode,
+      buttonLocale: locale,
+      onClick: this._onClick.bind(this, paymentRequestData),
+    });
+
+    container.appendChild(button);
+  }
+
+  async _onClick(paymentRequestData) {
+    try {
+      const paymentData = await this.googleClient.loadPaymentData(
+        paymentRequestData,
+      );
+
+      if (paymentData) {
+        await this._submitPayment(paymentData);
+      }
+    } catch (error) {
+      this.onError(error);
+    }
+  }
+
+  async _submitPayment(paymentData) {
     const { require: { shipping: requireShipping } = {} } = this.params;
     const { email, shippingAddress, paymentMethodData } = paymentData;
     const {
@@ -205,15 +206,12 @@ export default class StripeGooglePayment extends Payment {
     } = paymentMethodData;
     const token = JSON.parse(tokenizationData.token);
     const { card } = token;
-    const shouldUpdateAccount = !Boolean(cart.account && cart.account.email);
 
-    await this.updateCart({
-      ...(shouldUpdateAccount && {
-        account: {
-          email,
-          name: shippingAddress ? shippingAddress.name : billingAddress.name,
-        },
-      }),
+    this.onSuccess({
+      account: {
+        email,
+        name: shippingAddress ? shippingAddress.name : billingAddress.name,
+      },
       billing: {
         method: 'card',
         card: {
@@ -230,8 +228,6 @@ export default class StripeGooglePayment extends Payment {
         shipping: this._mapAddress(shippingAddress),
       }),
     });
-
-    this.onSuccess();
   }
 
   _mapAddress(address) {
