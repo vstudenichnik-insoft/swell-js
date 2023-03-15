@@ -97,14 +97,19 @@ export default class AmazonDirectPayment extends Payment {
           checkoutResultReturnUrl: `${returnUrl}&confirm=true&redirect_status=succeeded`,
           checkoutCancelUrl: `${returnUrl}&redirect_status=canceled`,
         },
-        paymentDetails: {
-          paymentIntent: 'Authorize',
-          canHandlePendingAuthorization: true,
-          chargeAmount: {
-            amount: cart.capture_total,
-            currencyCode: cart.currency,
-          },
-        },
+        paymentDetails:
+          cart.capture_total > 0
+            ? {
+                paymentIntent: 'Authorize',
+                canHandlePendingAuthorization: true,
+                chargeAmount: {
+                  amount: cart.capture_total,
+                  currencyCode: cart.currency,
+                },
+              }
+            : {
+                paymentIntent: 'Confirm',
+              },
       },
     });
 
