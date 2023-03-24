@@ -27,12 +27,16 @@ const mockPayment = {
           payload: 'test_amazon_session_payload',
           signature: 'test_amazon_session_signature',
         };
+      case 'braintree':
+        return 'braintree_authorization';
       default:
         throw new Error(`Unknown gateway: ${gateway}`);
     }
   }),
 
   onSuccess: jest.fn(),
+  onCancel: jest.fn(),
+  onError: jest.fn(),
 };
 
 export default mockPayment;
