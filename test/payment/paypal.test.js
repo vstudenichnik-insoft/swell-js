@@ -142,7 +142,7 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
       });
 
       it('should create elements', async () => {
-        paymentMock.getCart.mockImplementation(() =>
+        paymentMock.getCart.mockImplementationOnce(() =>
           Promise.resolve({ capture_total: 10 }),
         );
 
@@ -180,7 +180,7 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
       });
 
       it('should create elements with default params', async () => {
-        paymentMock.getCart.mockImplementation(() =>
+        paymentMock.getCart.mockImplementationOnce(() =>
           Promise.resolve({ capture_total: 10 }),
         );
 
@@ -217,15 +217,8 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
       });
 
       describe('#_createOrder', () => {
-        const data = null;
-        const actions = {
-          order: {
-            create: jest.fn(),
-          },
-        };
-
         it('should create order for PayPal Express', async () => {
-          paymentMock.getCart.mockImplementation(() =>
+          paymentMock.getCart.mockImplementationOnce(() =>
             Promise.resolve({ currency: 'EUR', capture_total: 10 }),
           );
 
@@ -238,17 +231,25 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
 
           await payment.createElements();
 
-          createOrder(data, actions);
+          createOrder();
 
-          expect(actions.order.create).toHaveBeenCalledWith({
-            intent: 'AUTHORIZE',
-            application_context: { shipping_preference: 'GET_FROM_FILE' },
-            purchase_units: [{ amount: { currency_code: 'EUR', value: 10 } }],
+          expect(paymentMock.createIntent).toHaveBeenCalledWith({
+            gateway: 'paypal',
+            intent: {
+              application_context: { shipping_preference: 'GET_FROM_FILE' },
+              intent: 'AUTHORIZE',
+              purchase_units: [
+                {
+                  amount: { value: 10, currency_code: 'EUR' },
+                  payee: { merchant_id: 'paypal_merchant_id' },
+                },
+              ],
+            },
           });
         });
 
         it('should create order when shipping is not required', async () => {
-          paymentMock.getCart.mockImplementation(() =>
+          paymentMock.getCart.mockImplementationOnce(() =>
             Promise.resolve({ currency: 'EUR', capture_total: 10 }),
           );
 
@@ -263,17 +264,25 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
 
           await payment.createElements();
 
-          createOrder(data, actions);
+          createOrder();
 
-          expect(actions.order.create).toHaveBeenCalledWith({
-            intent: 'AUTHORIZE',
-            application_context: { shipping_preference: 'NO_SHIPPING' },
-            purchase_units: [{ amount: { currency_code: 'EUR', value: 10 } }],
+          expect(paymentMock.createIntent).toHaveBeenCalledWith({
+            gateway: 'paypal',
+            intent: {
+              intent: 'AUTHORIZE',
+              application_context: { shipping_preference: 'NO_SHIPPING' },
+              purchase_units: [
+                {
+                  amount: { currency_code: 'EUR', value: 10 },
+                  payee: { merchant_id: 'paypal_merchant_id' },
+                },
+              ],
+            },
           });
         });
 
         it('should create order for PayPal Progressive Checkout', async () => {
-          paymentMock.getCart.mockImplementation(() =>
+          paymentMock.getCart.mockImplementationOnce(() =>
             Promise.resolve({ currency: 'EUR', capture_total: 10 }),
           );
 
@@ -288,35 +297,111 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
 
           await payment.createElements();
 
-          createOrder(data, actions);
+          createOrder();
 
-          expect(actions.order.create).toHaveBeenCalledWith({
-            intent: 'CAPTURE',
-            application_context: { shipping_preference: 'GET_FROM_FILE' },
-            purchase_units: [
-              {
-                amount: { currency_code: 'EUR', value: 10 },
-                payee: {
-                  email_address: 'example@email.com',
+          expect(paymentMock.createIntent).toHaveBeenCalledWith({
+            gateway: 'paypal',
+            intent: {
+              intent: 'CAPTURE',
+              application_context: { shipping_preference: 'GET_FROM_FILE' },
+              purchase_units: [
+                {
+                  amount: { currency_code: 'EUR', value: 10 },
+                  payee: {
+                    email_address: 'example@email.com',
+                  },
+                },
+              ],
+            },
+          });
+        });
+
+        it('should create order for PayPal Progressive Checkout with token vaulting', async () => {
+          methods.paypal.ppcp = true;
+          paymentMock.getCart.mockImplementationOnce(() =>
+            Promise.resolve({
+              currency: 'EUR',
+              capture_total: 10,
+              subscription_delivery: true,
+            }),
+          );
+
+          const payment = new PaypalDirectPayment(
+            request,
+            options,
+            params,
+            methods,
+          );
+
+          await payment.createElements();
+
+          createOrder();
+
+          expect(paymentMock.createIntent).toHaveBeenCalledWith({
+            gateway: 'paypal',
+            intent: {
+              intent: 'AUTHORIZE',
+              application_context: { shipping_preference: 'GET_FROM_FILE' },
+              purchase_units: [
+                {
+                  amount: { currency_code: 'EUR', value: 10 },
+                  payee: {
+                    merchant_id: 'test_ppcp_merchant_id',
+                  },
+                },
+              ],
+              payment_source: {
+                paypal: {
+                  attributes: {
+                    vault: {
+                      store_in_vault: 'ON_SUCCESS',
+                      usage_type: 'MERCHANT',
+                    },
+                  },
+                  experience_context: {
+                    cancel_url:
+                      'http://test.swell.test/checkout?gateway=paypal&redirect_status=canceled',
+                    return_url:
+                      'http://test.swell.test/checkout?gateway=paypal&redirect_status=succeeded',
+                  },
                 },
               },
-            ],
+            },
           });
+        });
+
+        it('should throw an error when the cart has subscription delivery and ppсp is disabled', async () => {
+          methods.paypal.ppcp = false;
+          paymentMock.getCart.mockImplementationOnce(() =>
+            Promise.resolve({
+              currency: 'EUR',
+              capture_total: 10,
+              subscription_delivery: true,
+            }),
+          );
+
+          const payment = new PaypalDirectPayment(
+            request,
+            options,
+            params,
+            methods,
+          );
+
+          await expect(payment.createElements()).rejects.toThrow(
+            'Subscriptions are only supported by PayPal Commerce Platform. See Payment settings in the Swell dashboard to enable PayPal Commerce Platform',
+          );
         });
       });
 
       describe('#_onShippingChange', () => {
         let data;
         const actions = {
-          order: {
-            patch: jest.fn(),
-          },
-          resolve: jest.fn(),
           reject: jest.fn(),
         };
 
         beforeEach(() => {
           data = {
+            orderID: 'paypal_order_id',
             shipping_address: {
               state: 'CA',
               city: 'San Jose',
@@ -327,6 +412,10 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
               id: 'express',
             },
           };
+
+          paymentMock.getCart.mockImplementationOnce(() =>
+            Promise.resolve({ currency: 'EUR', capture_total: 10 }),
+          );
 
           paymentMock.updateCart.mockImplementation((updateData) => {
             if (
@@ -389,43 +478,48 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
             shipment_rating: null,
             $taxes: true,
           });
-          expect(actions.order.patch).toHaveBeenCalledWith([
-            {
-              op: 'replace',
-              path: "/purchase_units/@reference_id=='default'/shipping/options",
-              value: [
+          expect(paymentMock.updateIntent).toHaveBeenCalledWith({
+            gateway: 'paypal',
+            intent: {
+              id: data.orderID,
+              data: [
                 {
-                  amount: { currency_code: 'EUR', value: '5.00' },
-                  id: 'standard',
-                  label: 'Standard Shipping',
-                  selected: false,
-                  type: 'SHIPPING',
+                  op: 'replace',
+                  path: "/purchase_units/@reference_id=='default'/shipping/options",
+                  value: [
+                    {
+                      amount: { currency_code: 'EUR', value: '5.00' },
+                      id: 'standard',
+                      label: 'Standard Shipping',
+                      selected: false,
+                      type: 'SHIPPING',
+                    },
+                    {
+                      amount: { currency_code: 'EUR', value: '15.00' },
+                      id: 'express',
+                      label: 'Express Shipping',
+                      selected: true,
+                      type: 'SHIPPING',
+                    },
+                  ],
                 },
                 {
-                  amount: { currency_code: 'EUR', value: '15.00' },
-                  id: 'express',
-                  label: 'Express Shipping',
-                  selected: true,
-                  type: 'SHIPPING',
+                  op: 'replace',
+                  path: "/purchase_units/@reference_id=='default'/amount",
+                  value: {
+                    breakdown: {
+                      discount: { currency_code: 'EUR', value: '0.00' },
+                      item_total: { currency_code: 'EUR', value: '15.00' },
+                      shipping: { currency_code: 'EUR', value: '5.00' },
+                      tax_total: { currency_code: 'EUR', value: '1.87' },
+                    },
+                    currency_code: 'EUR',
+                    value: '21.87',
+                  },
                 },
               ],
             },
-            {
-              op: 'replace',
-              path: "/purchase_units/@reference_id=='default'/amount",
-              value: {
-                breakdown: {
-                  discount: { currency_code: 'EUR', value: '0.00' },
-                  item_total: { currency_code: 'EUR', value: '15.00' },
-                  shipping: { currency_code: 'EUR', value: '5.00' },
-                  tax_total: { currency_code: 'EUR', value: '1.87' },
-                },
-                currency_code: 'EUR',
-                value: '21.87',
-              },
-            },
-          ]);
-          expect(actions.resolve).toHaveBeenCalled();
+          });
         });
 
         it('should update cart and patch PayPal order with first shipping service when service is not selected', async () => {
@@ -457,43 +551,48 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
             },
             $taxes: true,
           });
-          expect(actions.order.patch).toHaveBeenCalledWith([
-            {
-              op: 'add',
-              path: "/purchase_units/@reference_id=='default'/shipping/options",
-              value: [
+          expect(paymentMock.updateIntent).toHaveBeenCalledWith({
+            gateway: 'paypal',
+            intent: {
+              id: data.orderID,
+              data: [
                 {
-                  amount: { currency_code: 'EUR', value: '5.00' },
-                  id: 'standard',
-                  label: 'Standard Shipping',
-                  selected: true,
-                  type: 'SHIPPING',
+                  op: 'add',
+                  path: "/purchase_units/@reference_id=='default'/shipping/options",
+                  value: [
+                    {
+                      amount: { currency_code: 'EUR', value: '5.00' },
+                      id: 'standard',
+                      label: 'Standard Shipping',
+                      selected: true,
+                      type: 'SHIPPING',
+                    },
+                    {
+                      amount: { currency_code: 'EUR', value: '15.00' },
+                      id: 'express',
+                      label: 'Express Shipping',
+                      selected: false,
+                      type: 'SHIPPING',
+                    },
+                  ],
                 },
                 {
-                  amount: { currency_code: 'EUR', value: '15.00' },
-                  id: 'express',
-                  label: 'Express Shipping',
-                  selected: false,
-                  type: 'SHIPPING',
+                  op: 'replace',
+                  path: "/purchase_units/@reference_id=='default'/amount",
+                  value: {
+                    breakdown: {
+                      discount: { currency_code: 'EUR', value: '0.00' },
+                      item_total: { currency_code: 'EUR', value: '15.00' },
+                      shipping: { currency_code: 'EUR', value: '5.00' },
+                      tax_total: { currency_code: 'EUR', value: '1.87' },
+                    },
+                    currency_code: 'EUR',
+                    value: '21.87',
+                  },
                 },
               ],
             },
-            {
-              op: 'replace',
-              path: "/purchase_units/@reference_id=='default'/amount",
-              value: {
-                breakdown: {
-                  discount: { currency_code: 'EUR', value: '0.00' },
-                  item_total: { currency_code: 'EUR', value: '15.00' },
-                  shipping: { currency_code: 'EUR', value: '5.00' },
-                  tax_total: { currency_code: 'EUR', value: '1.87' },
-                },
-                currency_code: 'EUR',
-                value: '21.87',
-              },
-            },
-          ]);
-          expect(actions.resolve).toHaveBeenCalled();
+          });
         });
 
         it('should reject PayPal order update when no shipping services are available', async () => {
@@ -553,6 +652,12 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
             })),
           },
         };
+
+        beforeEach(() => {
+          paymentMock.getCart.mockImplementationOnce(() =>
+            Promise.resolve({ currency: 'EUR', capture_total: 10 }),
+          );
+        });
 
         it('should update cart with PayPal order details', async () => {
           const payment = new PaypalDirectPayment(
@@ -793,7 +898,7 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
 
       describe('#_createBillingAgreement', () => {
         it('should create PayPal billing agreement', async () => {
-          paymentMock.getCart.mockImplementation(() =>
+          paymentMock.getCart.mockImplementationOnce(() =>
             Promise.resolve({ currency: 'EUR', capture_total: 10 }),
           );
 
@@ -817,7 +922,7 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
         });
 
         it('should create PayPal billing agreement when shipping is not required', async () => {
-          paymentMock.getCart.mockImplementation(() =>
+          paymentMock.getCart.mockImplementationOnce(() =>
             Promise.resolve({ currency: 'EUR', capture_total: 10 }),
           );
 

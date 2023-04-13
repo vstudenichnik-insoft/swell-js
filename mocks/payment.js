@@ -13,6 +13,24 @@ const mockPayment = {
         return {
           redirect_url: 'https://www.amazon.com/',
         };
+      case 'paypal':
+        return {
+          id: 'paypal_order_id',
+        };
+      default:
+        throw new Error(`Unknown gateway: ${gateway}`);
+    }
+  }),
+
+  updateIntent: jest.fn((params) => {
+    const { gateway } = params;
+
+    switch (gateway) {
+      case 'paypal':
+      case 'paypal':
+        return {
+          id: 'paypal_order_id',
+        };
       default:
         throw new Error(`Unknown gateway: ${gateway}`);
     }

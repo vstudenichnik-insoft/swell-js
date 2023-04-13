@@ -39,8 +39,28 @@ export default class PaypalDirectPayment extends Payment {
     return ppcp ? this.method[`${mode}_merchant_id`] : this.method.merchant_id;
   }
 
+  get returnUrl() {
+    return `${
+      window.location.origin + window.location.pathname
+    }?gateway=paypal`;
+  }
+
   async createElements() {
     const cart = await this.getCart();
+    const hasSubscriptionProduct = Boolean(cart.subscription_delivery);
+
+    if (hasSubscriptionProduct && !this.method.ppcp) {
+      throw new Error(
+        'Subscriptions are only supported by PayPal Commerce Platform. See Payment settings in the Swell dashboard to enable PayPal Commerce Platform',
+      );
+    }
+
+    if (!(cart.capture_total > 0)) {
+      throw new Error(
+        'Invalid PayPal button amount. Value should be greater than zero.',
+      );
+    }
+
     const {
       elementId = 'paypal-button',
       locale = 'en_US',
@@ -60,16 +80,6 @@ export default class PaypalDirectPayment extends Payment {
       throw new DomElementNotFoundError(elementId);
     }
 
-    if (!(cart.capture_total > 0)) {
-      throw new Error(
-        'Invalid PayPal button amount. Value should be greater than zero.',
-      );
-    }
-
-    if (classes.base) {
-      container.classList.add(classes.base);
-    }
-
     const button = this.paypal.Buttons({
       locale,
       style: {
@@ -87,12 +97,23 @@ export default class PaypalDirectPayment extends Payment {
     });
 
     button.render(`#${elementId}`);
+
+    if (classes.base) {
+      container.classList.add(classes.base);
+    }
   }
 
-  _onCreateOrder(cart, data, actions) {
+  async _onCreateOrder(cart, data, actions) {
     const { require: { shipping: requireShipping = true } = {} } = this.params;
-    const { capture_total, currency } = cart;
+    const { capture_total, currency, subscription_delivery } = cart;
+    const hasSubscriptionProduct = Boolean(subscription_delivery);
     const merchantId = this.merchantId;
+    const returnUrl = this.returnUrl;
+    const orderData = {
+      application_context: {
+        shipping_preference: requireShipping ? 'GET_FROM_FILE' : 'NO_SHIPPING',
+      },
+    };
     const purchaseUnit = {
       amount: {
         value: Number(capture_total.toFixed(2)),
@@ -100,25 +121,50 @@ export default class PaypalDirectPayment extends Payment {
       },
     };
 
-    if (!merchantId) {
-      // payee email for progressive checkout
+    if (merchantId) {
+      // express checkout and ppcp
+      orderData.intent = 'AUTHORIZE';
+      purchaseUnit.payee = {
+        merchant_id: merchantId,
+      };
+
+      if (hasSubscriptionProduct) {
+        orderData.payment_source = {
+          paypal: {
+            attributes: {
+              vault: {
+                store_in_vault: 'ON_SUCCESS',
+                usage_type: 'MERCHANT',
+              },
+            },
+            experience_context: {
+              return_url: `${returnUrl}&redirect_status=succeeded`,
+              cancel_url: `${returnUrl}&redirect_status=canceled`,
+            },
+          },
+        };
+      }
+    } else {
+      // progressive checkout
+      orderData.intent = 'CAPTURE';
       purchaseUnit.payee = {
         email_address: this.method.store_owner_email,
       };
     }
 
-    return actions.order.create({
-      intent: merchantId ? 'AUTHORIZE' : 'CAPTURE',
-      purchase_units: [purchaseUnit],
-      application_context: {
-        shipping_preference: requireShipping ? 'GET_FROM_FILE' : 'NO_SHIPPING',
-      },
+    orderData.purchase_units = [purchaseUnit];
+
+    const order = await this.createIntent({
+      gateway: 'paypal',
+      intent: orderData,
     });
+
+    return order.id;
   }
 
   async _onShippingChange(data, actions) {
     try {
-      const { shipping_address, selected_shipping_option } = data;
+      const { orderID, shipping_address, selected_shipping_option } = data;
       const updateData = {
         shipping: {
           state: shipping_address.state,
@@ -167,50 +213,56 @@ export default class PaypalDirectPayment extends Payment {
         selectedShippingService = firstShippingService;
       }
 
-      await actions.order.patch([
-        {
-          op: operation,
-          path: "/purchase_units/@reference_id=='default'/shipping/options",
-          value: shippingServices.map((service) => ({
-            id: service.id,
-            label: service.name,
-            type: 'SHIPPING',
-            selected: service.id === selectedShippingService.id,
-            amount: {
-              value: service.price.toFixed(2),
-              currency_code: cart.currency,
+      await this.updateIntent({
+        gateway: 'paypal',
+        intent: {
+          id: orderID,
+          data: [
+            {
+              op: operation,
+              path: "/purchase_units/@reference_id=='default'/shipping/options",
+              value: shippingServices.map((service) => ({
+                id: service.id,
+                label: service.name,
+                type: 'SHIPPING',
+                selected: service.id === selectedShippingService.id,
+                amount: {
+                  value: service.price.toFixed(2),
+                  currency_code: cart.currency,
+                },
+              })),
             },
-          })),
-        },
-        {
-          op: 'replace',
-          path: "/purchase_units/@reference_id=='default'/amount",
-          value: {
-            currency_code: cart.currency,
-            value: cart.capture_total.toFixed(2),
-            breakdown: {
-              item_total: {
+            {
+              op: 'replace',
+              path: "/purchase_units/@reference_id=='default'/amount",
+              value: {
                 currency_code: cart.currency,
-                value: cart.sub_total.toFixed(2),
-              },
-              shipping: {
-                currency_code: cart.currency,
-                value: cart.shipment_total.toFixed(2),
-              },
-              tax_total: {
-                currency_code: cart.currency,
-                value: cart.tax_included_total.toFixed(2),
-              },
-              discount: {
-                currency_code: cart.currency,
-                value: cart.discount_total.toFixed(2),
+                value: cart.capture_total.toFixed(2),
+                breakdown: {
+                  item_total: {
+                    currency_code: cart.currency,
+                    value: cart.sub_total.toFixed(2),
+                  },
+                  shipping: {
+                    currency_code: cart.currency,
+                    value: cart.shipment_total.toFixed(2),
+                  },
+                  tax_total: {
+                    currency_code: cart.currency,
+                    value: cart.tax_included_total.toFixed(2),
+                  },
+                  discount: {
+                    currency_code: cart.currency,
+                    value: cart.discount_total.toFixed(2),
+                  },
+                },
               },
             },
-          },
+          ],
         },
-      ]);
+      });
 
-      return actions.resolve();
+      return orderID;
     } catch (error) {
       this.onError(error);
 
