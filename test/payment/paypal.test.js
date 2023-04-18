@@ -414,7 +414,10 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
           };
 
           paymentMock.getCart.mockImplementationOnce(() =>
-            Promise.resolve({ currency: 'EUR', capture_total: 10 }),
+            Promise.resolve({
+              currency: 'EUR',
+              capture_total: 10,
+            }),
           );
 
           paymentMock.updateCart.mockImplementation((updateData) => {
@@ -424,6 +427,7 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
                 updateData.shipping.country === 'US')
             ) {
               return {
+                id: 'test_cart_id',
                 currency: 'EUR',
                 capture_total: 21.87,
                 sub_total: 15,
@@ -481,43 +485,8 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
           expect(paymentMock.updateIntent).toHaveBeenCalledWith({
             gateway: 'paypal',
             intent: {
-              id: data.orderID,
-              data: [
-                {
-                  op: 'replace',
-                  path: "/purchase_units/@reference_id=='default'/shipping/options",
-                  value: [
-                    {
-                      amount: { currency_code: 'EUR', value: '5.00' },
-                      id: 'standard',
-                      label: 'Standard Shipping',
-                      selected: false,
-                      type: 'SHIPPING',
-                    },
-                    {
-                      amount: { currency_code: 'EUR', value: '15.00' },
-                      id: 'express',
-                      label: 'Express Shipping',
-                      selected: true,
-                      type: 'SHIPPING',
-                    },
-                  ],
-                },
-                {
-                  op: 'replace',
-                  path: "/purchase_units/@reference_id=='default'/amount",
-                  value: {
-                    breakdown: {
-                      discount: { currency_code: 'EUR', value: '0.00' },
-                      item_total: { currency_code: 'EUR', value: '15.00' },
-                      shipping: { currency_code: 'EUR', value: '5.00' },
-                      tax_total: { currency_code: 'EUR', value: '1.87' },
-                    },
-                    currency_code: 'EUR',
-                    value: '21.87',
-                  },
-                },
-              ],
+              paypal_order_id: data.orderID,
+              cart_id: 'test_cart_id',
             },
           });
         });
@@ -554,43 +523,8 @@ describePayment('payment/paypal', (request, options, paymentMock) => {
           expect(paymentMock.updateIntent).toHaveBeenCalledWith({
             gateway: 'paypal',
             intent: {
-              id: data.orderID,
-              data: [
-                {
-                  op: 'add',
-                  path: "/purchase_units/@reference_id=='default'/shipping/options",
-                  value: [
-                    {
-                      amount: { currency_code: 'EUR', value: '5.00' },
-                      id: 'standard',
-                      label: 'Standard Shipping',
-                      selected: true,
-                      type: 'SHIPPING',
-                    },
-                    {
-                      amount: { currency_code: 'EUR', value: '15.00' },
-                      id: 'express',
-                      label: 'Express Shipping',
-                      selected: false,
-                      type: 'SHIPPING',
-                    },
-                  ],
-                },
-                {
-                  op: 'replace',
-                  path: "/purchase_units/@reference_id=='default'/amount",
-                  value: {
-                    breakdown: {
-                      discount: { currency_code: 'EUR', value: '0.00' },
-                      item_total: { currency_code: 'EUR', value: '15.00' },
-                      shipping: { currency_code: 'EUR', value: '5.00' },
-                      tax_total: { currency_code: 'EUR', value: '1.87' },
-                    },
-                    currency_code: 'EUR',
-                    value: '21.87',
-                  },
-                },
-              ],
+              paypal_order_id: data.orderID,
+              cart_id: 'test_cart_id',
             },
           });
         });

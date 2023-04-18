@@ -180,7 +180,7 @@ export default class PaypalDirectPayment extends Payment {
         updateData.$taxes = true;
       }
 
-      let cart = await this.updateCart(updateData);
+      const cart = await this.updateCart(updateData);
       const shippingServices = get(cart, 'shipment_rating.services');
 
       // can't fulfill shipping to selected address
@@ -189,7 +189,6 @@ export default class PaypalDirectPayment extends Payment {
       }
 
       let selectedShippingService;
-      let operation = 'replace';
 
       if (selected_shipping_option) {
         selectedShippingService = shippingServices.find(
@@ -202,63 +201,19 @@ export default class PaypalDirectPayment extends Payment {
       if (!selectedShippingService) {
         const [firstShippingService] = shippingServices;
 
-        cart = await this.updateCart({
+        await this.updateCart({
           shipping: {
             service: firstShippingService.id,
           },
           $taxes: true,
         });
-
-        operation = 'add';
-        selectedShippingService = firstShippingService;
       }
 
       await this.updateIntent({
         gateway: 'paypal',
         intent: {
-          id: orderID,
-          data: [
-            {
-              op: operation,
-              path: "/purchase_units/@reference_id=='default'/shipping/options",
-              value: shippingServices.map((service) => ({
-                id: service.id,
-                label: service.name,
-                type: 'SHIPPING',
-                selected: service.id === selectedShippingService.id,
-                amount: {
-                  value: service.price.toFixed(2),
-                  currency_code: cart.currency,
-                },
-              })),
-            },
-            {
-              op: 'replace',
-              path: "/purchase_units/@reference_id=='default'/amount",
-              value: {
-                currency_code: cart.currency,
-                value: cart.capture_total.toFixed(2),
-                breakdown: {
-                  item_total: {
-                    currency_code: cart.currency,
-                    value: cart.sub_total.toFixed(2),
-                  },
-                  shipping: {
-                    currency_code: cart.currency,
-                    value: cart.shipment_total.toFixed(2),
-                  },
-                  tax_total: {
-                    currency_code: cart.currency,
-                    value: cart.tax_included_total.toFixed(2),
-                  },
-                  discount: {
-                    currency_code: cart.currency,
-                    value: cart.discount_total.toFixed(2),
-                  },
-                },
-              },
-            },
-          ],
+          cart_id: cart.id,
+          paypal_order_id: orderID,
         },
       });
 
