@@ -5521,36 +5521,50 @@ function methods$8(request, options) {
     settings: null,
     requested: false,
     pendingRequests: [],
-    cacheClear: null,
+    cacheClear: false,
 
     async requestStateChange(method, url, id, data) {
       return this.requestStateSync(async () => {
         const result = await request(method, url, id, data);
+
         if (result && result.errors) {
           return result;
         }
+
         this.state = result;
         return result;
       });
     },
 
+    nextRequest() {
+      if (this.pendingRequests.length <= 0) {
+        this.requested = false;
+        return;
+      }
+
+      const { handler, resolve, reject } = this.pendingRequests.shift();
+
+      return Promise.resolve().then(handler).then(resolve, reject).finally(() => {
+        this.nextRequest();
+      });
+    },
+
     async requestStateSync(handler) {
-      if (this.state) {
-        return await handler();
-      } else if (this.requested) {
-        return new Promise((resolve) => {
-          this.pendingRequests.push({ handler, resolve });
+      if (this.requested) {
+        return new Promise((resolve, reject) => {
+          this.pendingRequests.push({ handler, resolve, reject });
         });
       }
 
       this.requested = true;
-      const result = await handler();
-      this.requested = false;
-      while (this.pendingRequests.length > 0) {
-        const { handler, resolve } = this.pendingRequests.shift();
-        resolve(handler());
+
+      try {
+        const result = await handler();
+
+        return result;
+      } finally {
+        this.nextRequest();
       }
-      return result;
     },
 
     get() {
@@ -5559,7 +5573,7 @@ function methods$8(request, options) {
       }
       let data;
       if (this.cacheClear) {
-        this.cacheClear = null;
+        this.cacheClear = false;
         data = { $cache: false };
       }
       return this.requestStateChange('get', '/cart', undefined, data);
@@ -5653,7 +5667,7 @@ function methods$8(request, options) {
     },
 
     async submitOrder() {
-      const result = await request('post', '/cart/order');
+      const result = await this.requestStateChange('post', '/cart/order');
       if (result.errors) {
         return result;
       }
@@ -6367,12 +6381,94 @@ async function loadScripts(scripts) {
   await new Promise((resolve) => setTimeout(resolve, 1000));
 }
 
+class PaymentMethodDisabledError extends Error {
+  constructor(method) {
+    const message = `${method} payments are disabled. See Payment settings in the Swell dashboard for details`;
+    super(message);
+  }
+}
+
+class UnsupportedPaymentMethodError extends Error {
+  constructor(method, gateway) {
+    let message = `Unsupported payment method: ${method}`;
+
+    if (gateway) {
+      message += ` (${gateway})`;
+    }
+
+    super(message);
+  }
+}
+
+class UnableAuthenticatePaymentMethodError extends Error {
+  constructor() {
+    const message =
+      'We are unable to authenticate your payment method. Please choose a different payment method and try again';
+    super(message);
+  }
+}
+
+class LibraryNotLoadedError extends Error {
+  constructor(library) {
+    const message = `${library} was not loaded`;
+    super(message);
+  }
+}
+
+class MethodPropertyMissingError extends Error {
+  constructor(method, property) {
+    const message = `${method} ${property} is missing`;
+    super(message);
+  }
+}
+
+class DomElementNotFoundError extends Error {
+  constructor(elementId) {
+    const message = `DOM element with '${elementId}' ID not found`;
+    super(message);
+  }
+}
+
+class PaymentElementNotCreatedError extends Error {
+  constructor(methodName) {
+    const message = `The ${methodName} payment element was not created`;
+    super(message);
+  }
+}
+
 class Payment {
+  _element = null;
+  _elementContainer = null;
+
   constructor(request, options, params, method) {
     this.request = request;
     this.options = options;
     this.params = params;
     this.method = method;
+  }
+
+  get element() {
+    if (!this._element) {
+      throw new PaymentElementNotCreatedError(this.method.name);
+    }
+
+    return this._element;
+  }
+
+  set element(element) {
+    this._element = element;
+  }
+
+  get elementContainer() {
+    return this._elementContainer;
+  }
+
+  setElementContainer(elementId) {
+    this._elementContainer = document.getElementById(elementId);
+
+    if (!this.elementContainer) {
+      throw new DomElementNotFoundError(elementId);
+    }
   }
 
   async loadScripts(scripts) {
@@ -6613,6 +6709,7 @@ function setBancontactOwner(source, data) {
 function createElement(type, elements, params) {
   const elementParams = params[type] || params;
   const elementOptions = elementParams.options || {};
+  const elementId = elementParams.elementId || `${type}-element`;
   const element = elements.create(type, elementOptions);
 
   elementParams.onChange && element.on('change', elementParams.onChange);
@@ -6622,7 +6719,7 @@ function createElement(type, elements, params) {
   elementParams.onEscape && element.on('escape', elementParams.onEscape);
   elementParams.onClick && element.on('click', elementParams.onClick);
 
-  element.mount(elementParams.elementId || `#${type}-element`);
+  element.mount(`#${elementId}`);
 
   return element;
 }
@@ -6735,54 +6832,6 @@ function isStripeChargeableAmount(amount, currency) {
   return !minAmount || amount >= minAmount;
 }
 
-class PaymentMethodDisabledError extends Error {
-  constructor(method) {
-    const message = `${method} payments are disabled. See Payment settings in the Swell dashboard for details`;
-    super(message);
-  }
-}
-
-class UnsupportedPaymentMethodError extends Error {
-  constructor(method, gateway) {
-    let message = `Unsupported payment method: ${method}`;
-
-    if (gateway) {
-      message += ` (${gateway})`;
-    }
-
-    super(message);
-  }
-}
-
-class UnableAuthenticatePaymentMethodError extends Error {
-  constructor() {
-    const message =
-      'We are unable to authenticate your payment method. Please choose a different payment method and try again';
-    super(message);
-  }
-}
-
-class LibraryNotLoadedError extends Error {
-  constructor(library) {
-    const message = `${library} was not loaded`;
-    super(message);
-  }
-}
-
-class MethodPropertyMissingError extends Error {
-  constructor(method, property) {
-    const message = `${method} ${property} is missing`;
-    super(message);
-  }
-}
-
-class DomElementNotFoundError extends Error {
-  constructor(elementId) {
-    const message = `DOM element with '${elementId}' ID not found`;
-    super(message);
-  }
-}
-
 class StripeCardPayment extends Payment {
   constructor(request, options, params, methods) {
     super(request, options, params, methods.card);
@@ -6819,6 +6868,8 @@ class StripeCardPayment extends Payment {
   }
 
   async createElements() {
+    await this.loadScripts(this.scripts);
+
     const elements = this.stripe.elements(this.params.config);
 
     if (this.params.separateElements) {
@@ -6834,6 +6885,8 @@ class StripeCardPayment extends Payment {
     if (!this.stripeElement) {
       throw new Error('Stripe payment element is not defined');
     }
+
+    await this.loadScripts(this.scripts);
 
     const cart = await this.getCart();
     const paymentMethod = await createPaymentMethod(
@@ -6888,6 +6941,8 @@ class StripeCardPayment extends Payment {
     if (intent.error) {
       throw new Error(intent.error.message);
     }
+
+    await this.loadScripts(this.scripts);
 
     return this._confirmCardPayment(intent);
   }
@@ -6985,6 +7040,8 @@ class StripeIDealPayment extends Payment {
   }
 
   async createElements() {
+    await this.loadScripts(this.scripts);
+
     const elements = this.stripe.elements(this.params.config);
 
     this.stripeElement = createElement('idealBank', elements, this.params);
@@ -6994,6 +7051,8 @@ class StripeIDealPayment extends Payment {
     if (!this.stripeElement) {
       throw new Error('Stripe payment element is not defined');
     }
+
+    await this.loadScripts(this.scripts);
 
     const cart = await this.getCart();
     const { paymentMethod, error: paymentMethodError } =
@@ -7090,6 +7149,8 @@ class StripeBancontactPayment extends Payment {
   }
 
   async tokenize() {
+    await this.loadScripts(this.scripts);
+
     const cart = await this.getCart();
     const { source, error: sourceError } = await createBancontactSource(
       this.stripe,
@@ -7152,6 +7213,9 @@ class StripeKlarnaPayment extends Payment {
       gateway: 'stripe',
       intent: getKlarnaIntentDetails(cart),
     });
+
+    await this.loadScripts(this.scripts);
+
     const { error } = await this.stripe.confirmKlarnaPayment(
       intent.client_secret,
       getKlarnaConfirmationDetails(cart),
@@ -7292,9 +7356,18 @@ class StripeGooglePayment extends Payment {
   }
 
   async createElements() {
+    const {
+      elementId = 'googlepay-button',
+      locale = 'en',
+      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
+    } = this.params;
+
     if (!this.method.merchant_id) {
       throw new Error('Google merchant ID is not defined');
     }
+
+    this.setElementContainer(elementId);
+    await this.loadScripts(this.scripts);
 
     const isReadyToPay = await this.googleClient.isReadyToPay({
       apiVersion: API_VERSION$1,
@@ -7312,7 +7385,24 @@ class StripeGooglePayment extends Payment {
     const cart = await this.getCart();
     const paymentRequestData = this._createPaymentRequestData(cart);
 
-    this._renderButton(paymentRequestData);
+    this.element = this.googleClient.createButton({
+      buttonColor: color,
+      buttonType: type,
+      buttonSizeMode: sizeMode,
+      buttonLocale: locale,
+      onClick: this._onClick.bind(this, paymentRequestData),
+    });
+  }
+
+  mountElements() {
+    const { classes = {} } = this.params;
+    const container = this.elementContainer;
+
+    container.appendChild(this.element);
+
+    if (classes.base) {
+      container.classList.add(classes.base);
+    }
   }
 
   _createPaymentRequestData(cart) {
@@ -7342,35 +7432,6 @@ class StripeGooglePayment extends Payment {
         merchantId: this.method.merchant_id,
       },
     };
-  }
-
-  _renderButton(paymentRequestData) {
-    const {
-      elementId = 'googlepay-button',
-      locale = 'en',
-      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
-      classes = {},
-    } = this.params;
-
-    const container = document.getElementById(elementId);
-
-    if (!container) {
-      throw new DomElementNotFoundError(elementId);
-    }
-
-    if (classes.base) {
-      container.classList.add(classes.base);
-    }
-
-    const button = this.googleClient.createButton({
-      buttonColor: color,
-      buttonType: type,
-      buttonSizeMode: sizeMode,
-      buttonLocale: locale,
-      onClick: this._onClick.bind(this, paymentRequestData),
-    });
-
-    container.appendChild(button);
   }
 
   async _onClick(paymentRequestData) {
@@ -7472,6 +7533,14 @@ class StripeApplePayment extends Payment {
   }
 
   async createElements() {
+    const {
+      elementId = 'applepay-button',
+      style: { type = 'default', theme = 'dark', height = '40px' } = {},
+      classes = {},
+    } = this.params;
+
+    this.setElementContainer(elementId);
+    await this.loadScripts(this.scripts);
     await this._authorizeDomain();
 
     const cart = await this.getCart();
@@ -7484,7 +7553,21 @@ class StripeApplePayment extends Payment {
       );
     }
 
-    this._renderButton(paymentRequest);
+    this.element = this.stripe.elements().create('paymentRequestButton', {
+      paymentRequest,
+      style: {
+        paymentRequestButton: {
+          type,
+          theme,
+          height,
+        },
+      },
+      classes,
+    });
+  }
+
+  mountElements() {
+    this.element.mount(`#${this.elementContainer.id}`);
   }
 
   async _authorizeDomain() {
@@ -7524,34 +7607,6 @@ class StripeApplePayment extends Payment {
     paymentRequest.on('paymentmethod', this._onPaymentMethod.bind(this));
 
     return paymentRequest;
-  }
-
-  _renderButton(paymentRequest) {
-    const {
-      elementId = 'applepay-button',
-      style: { type = 'default', theme = 'dark', height = '40px' } = {},
-      classes = {},
-    } = this.params;
-
-    const container = document.getElementById(elementId);
-
-    if (!container) {
-      throw new DomElementNotFoundError(elementId);
-    }
-
-    const button = this.stripe.elements().create('paymentRequestButton', {
-      paymentRequest,
-      style: {
-        paymentRequestButton: {
-          type,
-          theme,
-          height,
-        },
-      },
-      classes,
-    });
-
-    button.mount(`#${elementId}`);
   }
 
   _getPaymentRequestData(cart) {
@@ -7753,7 +7808,6 @@ class BraintreePaypalPayment extends Payment {
   }
 
   async createElements() {
-    const cart = await this.getCart();
     const {
       elementId = 'paypal-button',
       locale = 'en_US',
@@ -7765,13 +7819,9 @@ class BraintreePaypalPayment extends Payment {
         label = 'paypal',
         tagline = false,
       } = {},
-      classes = {},
     } = this.params;
-    const container = document.getElementById(elementId);
 
-    if (!container) {
-      throw new DomElementNotFoundError(elementId);
-    }
+    this.setElementContainer(elementId);
 
     const authorization = await this.authorizeGateway({
       gateway: 'braintree',
@@ -7781,18 +7831,17 @@ class BraintreePaypalPayment extends Payment {
       throw new Error(authorization.error.message);
     }
 
+    await this.loadScripts(this.scripts);
+
     const braintreeClient = await this.braintree.client.create({
       authorization,
     });
     const paypalCheckout = await this.braintreePaypalCheckout.create({
       client: braintreeClient,
     });
+    const cart = await this.getCart();
 
-    if (classes.base) {
-      container.classList.add(classes.base);
-    }
-
-    const button = this.paypal.Buttons({
+    this.element = this.paypal.Buttons({
       locale,
       style: {
         layout,
@@ -7812,8 +7861,17 @@ class BraintreePaypalPayment extends Payment {
       onCancel: this.onCancel.bind(this),
       onError: this.onError.bind(this),
     });
+  }
 
-    button.render(`#${elementId}`);
+  mountElements() {
+    const { classes = {} } = this.params;
+    const container = this.elementContainer;
+
+    this.element.render(`#${container.id}`);
+
+    if (classes.base) {
+      container.classList.add(classes.base);
+    }
   }
 
   _createBillingAgreement(paypalCheckout, cart) {
@@ -7951,9 +8009,18 @@ class BraintreeGooglePayment extends Payment {
   }
 
   async createElements() {
+    const {
+      elementId = 'googlepay-button',
+      locale = 'en',
+      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
+    } = this.params;
+
     if (!this.method.merchant_id) {
       throw new Error('Google merchant ID is not defined');
     }
+
+    this.setElementContainer(elementId);
+    await this.loadScripts(this.scripts);
 
     const isReadyToPay = await this.googleClient.isReadyToPay({
       apiVersion: API_VERSION,
@@ -7979,7 +8046,24 @@ class BraintreeGooglePayment extends Payment {
     const paymentDataRequest =
       googlePayment.createPaymentDataRequest(paymentRequestData);
 
-    this._renderButton(googlePayment, paymentDataRequest);
+    this.element = this.googleClient.createButton({
+      buttonColor: color,
+      buttonType: type,
+      buttonSizeMode: sizeMode,
+      buttonLocale: locale,
+      onClick: this._onClick.bind(this, googlePayment, paymentDataRequest),
+    });
+  }
+
+  mountElements() {
+    const { classes = {} } = this.params;
+    const container = this.elementContainer;
+
+    container.appendChild(this.element);
+
+    if (classes.base) {
+      container.classList.add(classes.base);
+    }
   }
 
   async _createBraintreeClient() {
@@ -8023,35 +8107,6 @@ class BraintreeGooglePayment extends Payment {
         merchantId: this.method.merchant_id,
       },
     };
-  }
-
-  _renderButton(googlePayment, paymentDataRequest) {
-    const {
-      elementId = 'googlepay-button',
-      locale = 'en',
-      style: { color = 'black', type = 'buy', sizeMode = 'fill' } = {},
-      classes = {},
-    } = this.params;
-
-    const container = document.getElementById(elementId);
-
-    if (!container) {
-      throw new DomElementNotFoundError(elementId);
-    }
-
-    if (classes.base) {
-      container.classList.add(classes.base);
-    }
-
-    const button = this.googleClient.createButton({
-      buttonColor: color,
-      buttonType: type,
-      buttonSizeMode: sizeMode,
-      buttonLocale: locale,
-      onClick: this._onClick.bind(this, googlePayment, paymentDataRequest),
-    });
-
-    container.appendChild(button);
   }
 
   async _onClick(googlePayment, paymentDataRequest) {
@@ -8147,6 +8202,11 @@ class BraintreeApplePayment extends Payment {
   }
 
   async createElements() {
+    const { elementId = 'applepay-button' } = this.params;
+
+    this.setElementContainer(elementId);
+    await this.loadScripts(this.scripts);
+
     if (!this.ApplePaySession.canMakePayments()) {
       throw new Error(
         'This device is not capable of making Apple Pay payments',
@@ -8160,24 +8220,23 @@ class BraintreeApplePayment extends Payment {
     });
     const paymentRequest = await this._createPaymentRequest(cart, applePayment);
 
-    this._renderButton(applePayment, paymentRequest);
+    this.element = this._createButton(applePayment, paymentRequest);
   }
 
-  _renderButton(applePayment, paymentRequest) {
-    const {
-      elementId = 'applepay-button',
-      style: { type = 'plain', theme = 'black', height = '40px' } = {},
-      classes = {},
-    } = this.params;
-    const container = document.getElementById(elementId);
+  mountElements() {
+    const { classes = {} } = this.params;
+    const container = this.elementContainer;
 
-    if (!container) {
-      throw new DomElementNotFoundError(elementId);
-    }
+    container.appendChild(this.element);
 
     if (classes.base) {
       container.classList.add(classes.base);
     }
+  }
+
+  _createButton(applePayment, paymentRequest) {
+    const { style: { type = 'plain', theme = 'black', height = '40px' } = {} } =
+      this.params;
 
     const button = document.createElement('div');
 
@@ -8191,7 +8250,7 @@ class BraintreeApplePayment extends Payment {
       this._createPaymentSession.bind(this, applePayment, paymentRequest),
     );
 
-    container.appendChild(button);
+    return button;
   }
 
   async _createBraintreeClient() {
@@ -8654,21 +8713,6 @@ class PaypalDirectPayment extends Payment {
   }
 
   async createElements() {
-    const cart = await this.getCart();
-    const hasSubscriptionProduct = Boolean(cart.subscription_delivery);
-
-    if (hasSubscriptionProduct && !this.method.ppcp) {
-      throw new Error(
-        'Subscriptions are only supported by PayPal Commerce Platform. See Payment settings in the Swell dashboard to enable PayPal Commerce Platform',
-      );
-    }
-
-    if (!(cart.capture_total > 0)) {
-      throw new Error(
-        'Invalid PayPal button amount. Value should be greater than zero.',
-      );
-    }
-
     const {
       elementId = 'paypal-button',
       locale = 'en_US',
@@ -8680,15 +8724,16 @@ class PaypalDirectPayment extends Payment {
         label = 'paypal',
         tagline = false,
       } = {},
-      classes = {},
     } = this.params;
-    const container = document.getElementById(elementId);
 
-    if (!container) {
-      throw new DomElementNotFoundError(elementId);
-    }
+    this.setElementContainer(elementId);
 
-    const button = this.paypal.Buttons({
+    const cart = await this.getCart();
+
+    this._validateCart(cart);
+    await this.loadScripts(this.scripts);
+
+    this.element = this.paypal.Buttons({
       locale,
       style: {
         layout,
@@ -8703,11 +8748,32 @@ class PaypalDirectPayment extends Payment {
       onApprove: this._onApprove.bind(this),
       onError: this.onError.bind(this),
     });
+  }
 
-    button.render(`#${elementId}`);
+  mountElements() {
+    const { classes = {} } = this.params;
+    const container = this.elementContainer;
+
+    this.element.render(`#${container.id}`);
 
     if (classes.base) {
       container.classList.add(classes.base);
+    }
+  }
+
+  _validateCart(cart) {
+    const hasSubscriptionProduct = Boolean(cart.subscription_delivery);
+
+    if (hasSubscriptionProduct && !this.method.ppcp) {
+      throw new Error(
+        'Subscriptions are only supported by PayPal Commerce Platform. See Payment settings in the Swell dashboard to enable PayPal Commerce Platform',
+      );
+    }
+
+    if (!(cart.capture_total > 0)) {
+      throw new Error(
+        'Invalid PayPal button amount. Value should be greater than zero.',
+      );
     }
   }
 
@@ -8923,31 +8989,46 @@ class AmazonDirectPayment extends Payment {
   }
 
   async createElements() {
-    const cart = await this.getCart();
-    const returnUrl = this.returnUrl;
-    const isSubscription = Boolean(cart.subscription_delivery);
-    const session = await this.authorizeGateway({
-      gateway: 'amazon',
-      params: {
-        chargePermissionType: isSubscription ? 'Recurring' : 'OneTime',
-        ...(isSubscription
-          ? {
-              recurringMetadata: {
-                frequency: {
-                  unit: 'Variable',
-                  value: '0',
-                },
-              },
-            }
-          : {}),
-        webCheckoutDetails: {
-          checkoutReviewReturnUrl: `${returnUrl}&redirect_status=succeeded`,
-          checkoutCancelUrl: `${returnUrl}&redirect_status=canceled`,
-        },
-      },
-    });
+    const {
+      elementId = 'amazonpay-button',
+      locale = 'en_US',
+      placement = 'Checkout',
+      style: { color = 'Gold' } = {},
+      require: { shipping: requireShipping } = {},
+    } = this.params;
 
-    this._renderButton(cart, session);
+    this.setElementContainer(elementId);
+
+    const cart = await this.getCart();
+    const session = await this._createSession(cart);
+
+    await this.loadScripts(this.scripts);
+
+    this.element = {
+      ledgerCurrency: cart.currency,
+      checkoutLanguage: locale,
+      productType: Boolean(requireShipping) ? 'PayAndShip' : 'PayOnly',
+      buttonColor: color,
+      placement,
+      merchantId: this.merchantId,
+      publicKeyId: this.publicKeyId,
+      createCheckoutSessionConfig: {
+        payloadJSON: session.payload,
+        signature: session.signature,
+      },
+    };
+  }
+
+  mountElements() {
+    const { classes = {} } = this.params;
+    const container = this.elementContainer;
+    const amazon = this.amazon;
+
+    amazon.Pay.renderButton(`#${container.id}`, this.element);
+
+    if (classes.base) {
+      container.classList.add(classes.base);
+    }
   }
 
   async tokenize() {
@@ -9003,43 +9084,30 @@ class AmazonDirectPayment extends Payment {
     }
   }
 
-  _renderButton(cart, session) {
-    const amazon = this.amazon;
-    const merchantId = this.merchantId;
-    const publicKeyId = this.publicKeyId;
-    const { payload: payloadJSON, signature } = session;
-    const {
-      elementId = 'amazonpay-button',
-      locale = 'en_US',
-      placement = 'Checkout',
-      style: { color = 'Gold' } = {},
-      require: { shipping: requireShipping } = {},
-      classes = {},
-    } = this.params;
+  _createSession(cart) {
+    const returnUrl = this.returnUrl;
+    const isSubscription = Boolean(cart.subscription_delivery);
 
-    const container = document.getElementById(elementId);
-
-    if (!container) {
-      throw new DomElementNotFoundError(elementId);
-    }
-
-    amazon.Pay.renderButton(`#${elementId}`, {
-      ledgerCurrency: cart.currency,
-      checkoutLanguage: locale,
-      productType: Boolean(requireShipping) ? 'PayAndShip' : 'PayOnly',
-      buttonColor: color,
-      placement,
-      merchantId,
-      publicKeyId,
-      createCheckoutSessionConfig: {
-        payloadJSON,
-        signature,
+    return this.authorizeGateway({
+      gateway: 'amazon',
+      params: {
+        chargePermissionType: isSubscription ? 'Recurring' : 'OneTime',
+        ...(isSubscription
+          ? {
+              recurringMetadata: {
+                frequency: {
+                  unit: 'Variable',
+                  value: '0',
+                },
+              },
+            }
+          : {}),
+        webCheckoutDetails: {
+          checkoutReviewReturnUrl: `${returnUrl}&redirect_status=succeeded`,
+          checkoutCancelUrl: `${returnUrl}&redirect_status=canceled`,
+        },
       },
     });
-
-    if (classes.base) {
-      container.classList.add(classes.base);
-    }
   }
 
   async _handleSuccessfulRedirect(queryParams) {
@@ -9058,6 +9126,68 @@ class AmazonDirectPayment extends Payment {
 
     this.onSuccess();
   }
+}
+
+function adjustConfig(params) {
+  if (!params.config) {
+    return;
+  }
+
+  if (params.card) {
+    console.warn('Please move the "config" field to the "card.config"');
+
+    params.card.config = params.config;
+  }
+
+  if (params.ideal) {
+    console.warn('Please move the "config" field to the "ideal.config"');
+
+    params.ideal.config = params.config;
+  }
+
+  delete params.config;
+}
+
+function adjustElementId(methodParams) {
+  if (methodParams.cardNumber) {
+    adjustElementId(methodParams.cardNumber);
+  }
+
+  if (methodParams.cardExpiry) {
+    adjustElementId(methodParams.cardExpiry);
+  }
+
+  if (methodParams.cardCvc) {
+    adjustElementId(methodParams.cardCvc);
+  }
+
+  if (!methodParams.elementId) {
+    return;
+  }
+
+  if (methodParams.elementId.startsWith('#')) {
+    console.warn(
+      `Please remove the "#" sign from the "${methodParams.elementId}" element ID`,
+    );
+
+    methodParams.elementId = methodParams.elementId.substring(1);
+  }
+}
+
+function adjustParams(_params) {
+  const params = { ..._params };
+
+  adjustConfig(params);
+
+  return params;
+}
+
+function adjustMethodParams(_methodParams) {
+  const methodParams = { ..._methodParams };
+
+  adjustElementId(methodParams);
+
+  return methodParams;
 }
 
 class PaymentController {
@@ -9087,7 +9217,12 @@ class PaymentController {
       throw new Error('Payment element parameters are not provided');
     }
 
-    this._performPaymentAction('createElements');
+    const paymentInstances = await this._createPaymentInstances();
+
+    await this._performPaymentAction(paymentInstances, 'createElements').then(
+      (paymentInstances) =>
+        this._performPaymentAction(paymentInstances, 'mountElements'),
+    );
   }
 
   async tokenize(params = this.params) {
@@ -9097,7 +9232,9 @@ class PaymentController {
       throw new Error('Tokenization parameters are not provided');
     }
 
-    this._performPaymentAction('tokenize');
+    const paymentInstances = await this._createPaymentInstances();
+
+    await this._performPaymentAction(paymentInstances, 'tokenize');
   }
 
   async handleRedirect(params = this.params) {
@@ -9114,7 +9251,14 @@ class PaymentController {
     }
 
     removeUrlParams();
-    this._performPaymentAction('handleRedirect', queryParams);
+
+    const paymentInstances = await this._createPaymentInstances();
+
+    await this._performPaymentAction(
+      paymentInstances,
+      'handleRedirect',
+      queryParams,
+    );
   }
 
   async authenticate(id) {
@@ -9165,28 +9309,6 @@ class PaymentController {
     return this._vaultRequest('post', '/authorization', data);
   }
 
-  _normalizeParams() {
-    if (!this.params) {
-      return;
-    }
-
-    if (this.params.config) {
-      console.warn(
-        'Please move the "config" field to the payment method parameters ("card.config" or/and "ideal.config").',
-      );
-
-      if (this.params.card) {
-        this.params.card.config = this.params.config;
-      }
-
-      if (this.params.ideal) {
-        this.params.ideal.config = this.params.config;
-      }
-
-      delete this.params.config;
-    }
-  }
-
   async _getPaymentMethods() {
     const paymentMethods = await methods$2(
       this.request,
@@ -9219,16 +9341,17 @@ class PaymentController {
     return response;
   }
 
-  async _performPaymentAction(action, ...args) {
+  async _createPaymentInstances() {
     const paymentMethods = await this._getPaymentMethods();
+    const params = adjustParams(this.params);
 
-    this._normalizeParams();
-
-    Object.entries(this.params).forEach(([method, params]) => {
+    return Object.entries(params).reduce((acc, [method, params]) => {
       const methodSettings = paymentMethods[method];
 
       if (!methodSettings) {
-        return console.error(new PaymentMethodDisabledError(method));
+        console.error(new PaymentMethodDisabledError(method));
+
+        return acc;
       }
 
       const PaymentClass = this._getPaymentClass(
@@ -9237,27 +9360,51 @@ class PaymentController {
       );
 
       if (!PaymentClass) {
-        return console.error(
+        console.error(
           new UnsupportedPaymentMethodError(method, methodSettings.gateway),
         );
+
+        return acc;
       }
 
+      const methodParams = adjustMethodParams(params);
+
       try {
-        const payment = new PaymentClass(
+        const paymentInstance = new PaymentClass(
           this.request,
           this.options,
-          params,
+          methodParams,
           paymentMethods,
         );
 
-        payment
-          .loadScripts(payment.scripts)
-          .then(payment[action].bind(payment, ...args))
-          .catch(payment.onError.bind(payment));
+        acc.push(paymentInstance);
       } catch (error) {
-        return console.error(error.message);
+        console.error(error.message);
       }
-    });
+
+      return acc;
+    }, []);
+  }
+
+  async _performPaymentAction(paymentInstances, action, ...args) {
+    const nextPaymentInstances = [];
+
+    for (const paymentInstance of paymentInstances) {
+      try {
+        const paymentAction = paymentInstance[action];
+
+        if (paymentAction) {
+          await paymentAction.call(paymentInstance, ...args);
+          nextPaymentInstances.push(paymentInstance);
+        }
+      } catch (error) {
+        const onPaymentError = paymentInstance.onError.bind(paymentInstance);
+
+        onPaymentError(error);
+      }
+    }
+
+    return nextPaymentInstances;
   }
 
   _getPaymentClass(method, gateway) {
@@ -9614,7 +9761,7 @@ const options = {
 };
 
 const api = {
-  version: '3.22.0',
+  version: '3.22.1',
   options,
   request,
 
